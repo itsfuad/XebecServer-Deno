@@ -1,4 +1,4 @@
-import { XebecServer } from "./server.ts"; // Adjust the import path as needed
+import { XebecServer } from "./mod.ts"; // Adjust the import path as needed
 import { assertEquals } from "https://deno.land/std@0.177.0/testing/asserts.ts";
 
 // Test the XebecServer class
@@ -103,8 +103,16 @@ Deno.test("XebecServer - POST request", async () => {
 
   app.POST("/submit", async (req) => {
     const formData = await req.formData();
-    const name = formData.get("name");
-    return new Response(`Submitted: ${name}`);
+    const val = formData.get("name");
+    if (!val) {
+      return new Response("No name provided", { status: 400 });
+    }
+
+    if (typeof val !== "string") {
+      return new Response("Invalid name", { status: 400 });
+    }
+    
+    return new Response(`Submitted: ${val}`);
   });
 
   const formData = new FormData();

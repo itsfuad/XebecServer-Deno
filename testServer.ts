@@ -1,6 +1,6 @@
 import { Server } from "https://deno.land/x/socket_io@0.2.1/mod.ts";
 
-import { XebecServer } from "./server.ts";
+import { XebecServer } from "./mod.ts";
 
 // Use case
 const app = new XebecServer();
