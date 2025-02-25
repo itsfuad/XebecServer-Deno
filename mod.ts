@@ -62,11 +62,12 @@ export class XebecServer {
       regex: RegExp;
       paramNames: string[];
       handler: Handler;
-      isWildcard: boolean; // New field to indicate wildcard routes
+      isWildcard: boolean;
     }>;
   } = {};
 
   private readonly middlewares: Middleware[] = [];
+  private wildcardRoutes: { [method: string]: Handler | null } = {};
 
   // Middleware
   use(middleware: Middleware) {
@@ -99,73 +100,63 @@ export class XebecServer {
   }
 
   route(prefix: string, instance: XebecServer) {
-    // Ensure the prefix starts with a slash
     if (!prefix.startsWith("/")) {
       prefix = "/" + prefix;
     }
-
-    // Add a middleware to handle the routing
-    this.use((req, next) => {
+  
+    this.use(async (req, next) => {
       const url = new URL(req.url);
       const pathname = url.pathname;
-
-      // Check if the request path starts with the prefix
+  
       if (pathname.startsWith(prefix)) {
-        // Adjust the pathname by removing the prefix
         const newPathname = pathname.slice(prefix.length) || "/";
         const newUrl = new URL(newPathname + url.search, url.origin);
-
-        // Create a new request with the adjusted URL
         const newReq = new Req(
           new Request(newUrl.toString(), req),
           req.clone(),
           req.params,
           req.query
         );
-
-        // Handle the request with the nested server instance
-        return instance.handler(newReq);
+  
+        const response = await instance.handler(newReq);
+  
+        // If the child server returns 404, allow the parent to handle it
+        if (response.status !== 404) {
+          return response;
+        }
       }
-
-      // If the prefix doesn't match, proceed to the next middleware or route handler
+  
       return next();
     });
-  }
+  }  
 
   private addRoute(method: string, path: string, handler: Handler) {
     const paramNames: string[] = [];
-    let isWildcard = false;
+    const isWildcard = path === "*";
 
-    // Check if the path contains a wildcard
-    if (path.includes("*")) {
-      isWildcard = true;
-    }
-
-    const escapedPath = path.replace(/[.+*?^${}()|[\]\\]/g, "\\$&");
-    const regexPattern = escapedPath.replace(/:\w+/g, (param) => {
+    let regexPattern = path.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    regexPattern = regexPattern.replace(/:\w+/g, (param) => {
       paramNames.push(param.slice(1));
       return "([^\\/]+)";
     });
 
-    // Handle wildcard routes
-    let regex: RegExp;
-    if (isWildcard) {
-      // Replace the wildcard with a regex that matches any path
-      regex = new RegExp(`^${regexPattern.replace(/\*/g, ".*")}$`);
-    } else {
-      regex = new RegExp(`^${regexPattern}$`);
-    }
+    const regex = new RegExp(`^${regexPattern.replace(/\*/g, ".*")}$`);
 
     if (!this.routes[method]) {
       this.routes[method] = [];
     }
-    this.routes[method].push({
-      pattern: path,
-      regex,
-      paramNames,
-      handler,
-      isWildcard, // Store whether this is a wildcard route
-    });
+
+    if (isWildcard) {
+      this.wildcardRoutes[method] = handler;
+    } else {
+      this.routes[method].push({
+        pattern: path,
+        regex,
+        paramNames,
+        handler,
+        isWildcard,
+      });
+    }
   }
 
   handler(req: Request) {
@@ -174,42 +165,41 @@ export class XebecServer {
     const method = req.method.toUpperCase();
     const routesForMethod = this.routes[method] || [];
 
-    // Convert Request to Req
     const clonedReq = new Req(req, req.clone(), {}, {});
-    // Apply middleware
+
     let index = 0;
-    const next = () => {
+    const next = (): Promise<Response> | Response => {
       if (index < this.middlewares.length) {
-        const middleware = this.middlewares[index++];
-        return middleware(clonedReq, next);
+        return this.middlewares[index++](clonedReq, next);
       }
 
-      // Matching route handling
+      let matchedHandler: Handler | null = null;
+      const matchedParams: Record<string, string> = {};
+
       for (const route of routesForMethod) {
         const match = route.regex.exec(pathname);
-        if (match || route.isWildcard) {
-          const params: Record<string, string> = {};
-          if (match) {
-            route.paramNames.forEach((name, index) => {
-              params[name] = match[index + 1];
-            });
-          }
-
-          const query: Record<string, string> = {};
-          url.searchParams.forEach((value, key) => {
-            query[key] = value;
+        if (match) {
+          route.paramNames.forEach((name, index) => {
+            matchedParams[name] = match[index + 1];
           });
 
-          clonedReq.params = params;
-          clonedReq.query = query;
-
-          return route.handler(clonedReq);
+          matchedHandler = route.handler;
+          break;
         }
+      }
+
+      if (!matchedHandler && this.wildcardRoutes[method]) {
+        matchedHandler = this.wildcardRoutes[method];
+      }
+
+      if (matchedHandler) {
+        clonedReq.params = matchedParams;
+        return matchedHandler(clonedReq);
       }
 
       return new Response("Not found", { status: 404 });
     };
 
-    return next(); // Start middleware chain
+    return next();
   }
 }

@@ -5,6 +5,10 @@ import { XebecServer } from "./mod.ts";
 // Use case
 const app = new XebecServer();
 
+app.OPTIONS("*", (_) => {
+  return new Response("Wildcard", { status: 200 });
+});
+
 // Middleware example
 app.use(async (req, next) => {
   console.log(`Incoming request: ${req.url}`);
@@ -103,4 +107,4 @@ export const handler = io.handler(async (req: Request) => {
   return await app.handler(req) || new Response(null, { status: 404 });
 });
 
-Deno.serve({ handler, port: 8080 });
+Deno.serve({ handler, port: 7777 });

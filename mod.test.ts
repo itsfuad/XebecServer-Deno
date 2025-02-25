@@ -132,13 +132,39 @@ Deno.test("XebecServer - POST request", async () => {
 Deno.test("XebecServer - * wildcard route", async () => {
   const app = new XebecServer();
 
-  app.GET("*", () => {
+  // Register OPTIONS wildcard route
+  app.OPTIONS("*", () => {
     return new Response("Wildcard route");
   });
 
-  const request = new Request("http://localhost:8080/anything");
+  // Test OPTIONS request for any path
+  const request = new Request("http://localhost:8080/anything", {
+    method: "OPTIONS",
+  });
   const response = await app.handler(request);
+  const responseText = await response.text(); // Store before reuse
 
-  assertEquals(await response.text(), "Wildcard route");
+  assertEquals(responseText, "Wildcard route");
   assertEquals(response.status, 200);
+
+  // Create a secondary handler
+  const otherHandler = new XebecServer();
+  otherHandler.GET("/specificPath", () => {
+    return new Response("Specific route");
+  });
+
+  // Mount it under /specific
+  app.route("/specific", otherHandler);
+
+  // Send an OPTIONS request to a nested route
+  const otherRequest = new Request("http://localhost:8080/specific/specificPath", {
+    method: "OPTIONS",
+  });
+  const otherResponse = await app.handler(otherRequest);
+  const otherResponseText = await otherResponse.text(); // Store before reuse
+
+  console.log(otherResponseText);
+
+  assertEquals(otherResponseText, "Wildcard route");
+  assertEquals(otherResponse.status, 200);
 });
