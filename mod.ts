@@ -175,12 +175,18 @@ export class XebecServer {
 
       let matchedHandler: Handler | null = null;
       const matchedParams: Record<string, string> = {};
+      const matchedQuery: Record<string, string> = {};
 
       for (const route of routesForMethod) {
         const match = route.regex.exec(pathname);
         if (match) {
           route.paramNames.forEach((name, index) => {
             matchedParams[name] = match[index + 1];
+          });
+
+          const searchParams = new URLSearchParams(url.search);
+          searchParams.forEach((value, key) => {
+            matchedQuery[key] = value;
           });
 
           matchedHandler = route.handler;
@@ -194,6 +200,7 @@ export class XebecServer {
 
       if (matchedHandler) {
         clonedReq.params = matchedParams;
+        clonedReq.query = matchedQuery;
         return matchedHandler(clonedReq);
       }
 
