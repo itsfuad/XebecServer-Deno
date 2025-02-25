@@ -26,7 +26,7 @@ Xebec Server is ideal for building backend applications that require:
 Define routes and middleware in your server file as follows:
 
 ```ts
-import { XebecServer } from "./server.ts";
+import { XebecServer } from "https://deno.land/x/xebec@v0.0.5/mod.ts";
 
 // Initialize the server
 const app = new XebecServer();
@@ -56,7 +56,7 @@ Xebec Server can be integrated with Socket.IO to provide WebSocket support. Belo
 
 ```ts
 import { Server } from "https://deno.land/x/socket_io@0.2.1/mod.ts";
-import { XebecServer } from "./server.ts";
+import { XebecServer } from "https://deno.land/x/xebec@v0.0.5/mod.ts";
 
 // Create Xebec server instance
 const app = new XebecServer();
