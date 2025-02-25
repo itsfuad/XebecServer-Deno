@@ -35,7 +35,7 @@
  * server.route("/admin", adminServer);
  */
 
-class Req extends Request {
+export class Req extends Request {
   params: Record<string, string>;
   query: Record<string, string>;
 
@@ -51,9 +51,9 @@ class Req extends Request {
   }
 }
 
-type Handler = (req: Req) => Promise<Response> | Response;
+export type Handler = (req: Req) => Promise<Response> | Response;
 
-type Middleware = (req: Req, next: () => Promise<Response> | Response) => Promise<Response> | Response;
+export type Middleware = (req: Req, next: () => Promise<Response> | Response) => Promise<Response> | Response;
 
 export class XebecServer {
   private routes: {
