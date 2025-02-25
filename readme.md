@@ -2,6 +2,8 @@
 
 Xebec Server is a lightweight HTTP server featuring routing, middleware, and nested routing capabilities for Deno projects. It supports RESTful route definitions with dynamic parameters and integrates seamlessly with Socket.IO for real-time applications.
 
+![logo](cover.png)
+
 ## Use Case
 
 Xebec Server is ideal for building backend applications that require:
