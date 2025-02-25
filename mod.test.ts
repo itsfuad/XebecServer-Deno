@@ -111,7 +111,7 @@ Deno.test("XebecServer - POST request", async () => {
     if (typeof val !== "string") {
       return new Response("Invalid name", { status: 400 });
     }
-    
+
     return new Response(`Submitted: ${val}`);
   });
 
@@ -126,5 +126,19 @@ Deno.test("XebecServer - POST request", async () => {
   const response = await app.handler(request);
 
   assertEquals(await response.text(), "Submitted: Deno");
+  assertEquals(response.status, 200);
+});
+
+Deno.test("XebecServer - * wildcard route", async () => {
+  const app = new XebecServer();
+
+  app.GET("*", () => {
+    return new Response("Wildcard route");
+  });
+
+  const request = new Request("http://localhost:8080/anything");
+  const response = await app.handler(request);
+
+  assertEquals(await response.text(), "Wildcard route");
   assertEquals(response.status, 200);
 });

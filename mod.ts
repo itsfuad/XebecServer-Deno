@@ -62,6 +62,7 @@ export class XebecServer {
       regex: RegExp;
       paramNames: string[];
       handler: Handler;
+      isWildcard: boolean; // New field to indicate wildcard routes
     }>;
   } = {};
 
@@ -133,12 +134,27 @@ export class XebecServer {
 
   private addRoute(method: string, path: string, handler: Handler) {
     const paramNames: string[] = [];
+    let isWildcard = false;
+
+    // Check if the path contains a wildcard
+    if (path.includes("*")) {
+      isWildcard = true;
+    }
+
     const escapedPath = path.replace(/[.+*?^${}()|[\]\\]/g, "\\$&");
     const regexPattern = escapedPath.replace(/:\w+/g, (param) => {
       paramNames.push(param.slice(1));
       return "([^\\/]+)";
     });
-    const regex = new RegExp(`^${regexPattern}$`);
+
+    // Handle wildcard routes
+    let regex: RegExp;
+    if (isWildcard) {
+      // Replace the wildcard with a regex that matches any path
+      regex = new RegExp(`^${regexPattern.replace(/\*/g, ".*")}$`);
+    } else {
+      regex = new RegExp(`^${regexPattern}$`);
+    }
 
     if (!this.routes[method]) {
       this.routes[method] = [];
@@ -148,6 +164,7 @@ export class XebecServer {
       regex,
       paramNames,
       handler,
+      isWildcard, // Store whether this is a wildcard route
     });
   }
 
@@ -170,11 +187,13 @@ export class XebecServer {
       // Matching route handling
       for (const route of routesForMethod) {
         const match = route.regex.exec(pathname);
-        if (match) {
+        if (match || route.isWildcard) {
           const params: Record<string, string> = {};
-          route.paramNames.forEach((name, index) => {
-            params[name] = match[index + 1];
-          });
+          if (match) {
+            route.paramNames.forEach((name, index) => {
+              params[name] = match[index + 1];
+            });
+          }
 
           const query: Record<string, string> = {};
           url.searchParams.forEach((value, key) => {
