@@ -94,7 +94,8 @@ Deno.test("XebecServer - 404 Not Found", async () => {
   const request = new Request("http://localhost:8080/does-not-exist");
   const response = await app.handler(request);
 
-  assertEquals(await response.text(), "Not found");
+  const body = await response.json();
+  assertEquals(body.error, "Not found");
   assertEquals(response.status, 404);
 });
 

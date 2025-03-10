@@ -1,104 +1,127 @@
 # Xebec Server
 
-Xebec Server is a lightweight HTTP server featuring routing, middleware, and nested routing capabilities for Deno projects. It supports RESTful route definitions with dynamic parameters and integrates seamlessly with Socket.IO for real-time applications.
+A lightweight, modern HTTP server for Deno with built-in routing, middleware support, and TypeScript integration.
 
-## Use Case
+## Features
 
-Xebec Server is ideal for building backend applications that require:
+- 🚀 Lightweight and fast
+- 🔒 Built-in security features (CORS, rate limiting, security headers)
+- 🎯 TypeScript support with full type safety
+- 🔄 Middleware support
+- 🛣️ Dynamic routing with URL parameters
+- 📝 Comprehensive documentation
+- 🧪 Easy to test and extend
 
-- Simple REST API development with dynamic routes (e.g., `/user/:id`)
-- Middleware support for logging, authentication, or request modification
-- Nested routing to organize large applications by delegating specific paths
-- Real-time server capabilities when integrated with Socket.IO
+## Installation
 
-## How to Use It
-
-### Installation
-
-1. Clone the repository and navigate to the project directory.
-2. Ensure you have Deno installed.
-3. The project uses Deno dependencies such as Socket.IO. No additional setup is needed.
-
-### Routing and Middleware
-
-Define routes and middleware in your server file as follows:
-
-```ts
-import { XebecServer } from "./server.ts";
-
-// Initialize the server
-const app = new XebecServer();
-
-// Global middleware example: Logging incoming requests
-app.use(async (req, next) => {
-    console.log(`Incoming request: ${req.url}`);
-    const response = await next();
-    response.headers.set("X-Served-By", "XebecServer");
-    return response;
-});
-
-// Define a simple GET route
-app.GET("/", (_) => {
-    return new Response("Hello, Deno Deploy!");
-});
-
-// Dynamic route with parameters
-app.GET("/user/:id", (req) => {
-    return new Response(`User ID: ${req.params.id}`);
-});
+```bash
+deno add xebec-server
 ```
 
-### Integrating with Socket.IO
+## Quick Start
 
-Xebec Server can be integrated with Socket.IO to provide WebSocket support. Below is a sample integration:
+```typescript
+import { XebecServer, cors, securityHeaders, rateLimit } from "xebec-server";
 
-```ts
-import { Server } from "https://deno.land/x/socket_io@0.2.1/mod.ts";
-import { XebecServer } from "./server.ts";
-
-// Create Xebec server instance
-const app = new XebecServer();
-
-// Define routes and middleware here...
-app.GET("/", (_) => {
-    return new Response("Hello, with Socket.IO!");
+const server = new XebecServer({
+  debug: true,
+  maxBodySize: 1024 * 1024, // 1MB
+  defaultHeaders: {
+    "X-Powered-By": "Xebec"
+  }
 });
 
-// Initialize a Socket.IO server with CORS support
-const io = new Server({
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-        credentials: true,
-    },
+// Add global middleware
+server.use(cors({
+  origin: "https://example.com",
+  methods: ["GET", "POST"],
+  credentials: true
+}));
+server.use(securityHeaders());
+server.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
+
+// Define routes
+server.GET("/", (req) => ResponseHelper.text("Hello World!"));
+
+server.GET("/user/:id", (req) => {
+  return ResponseHelper.json({ id: req.params.id });
 });
 
-// Create a combined request handler for HTTP and WebSocket upgrades
-export const handler = io.handler(async (req: Request) => {
-    // Upgrade to WebSocket if applicable, otherwise handle HTTP request
-    return await app.handler(req) || new Response(null, { status: 404 });
+server.POST("/api/data", async (req) => {
+  const data = await req.json();
+  return ResponseHelper.json({ success: true, data });
+}, {
+  options: {
+    parseJson: true,
+    validate: (req) => {
+      // Add custom validation
+      return true;
+    }
+  }
 });
 
-// Serve on a designated port
-Deno.serve({ handler, port: 8080 });
+// Start the server
+await server.listen({ port: 8000 });
 ```
 
-### Running the Server
+## API Documentation
 
-Run your server using Deno:
+### XebecServer
 
-```sh
-deno run --allow-net --allow-write --allow-read server.ts
+The main server class that handles routing and middleware.
+
+#### Constructor Options
+
+```typescript
+interface ServerOptions {
+  debug?: boolean;           // Enable detailed request logging
+  maxBodySize?: number;      // Maximum request body size in bytes
+  defaultHeaders?: Record<string, string>;  // Default response headers
+  errorHandler?: (error: Error, req: Req) => Response | Promise<Response>;  // Custom error handler
+}
 ```
 
-### Testing
+#### Methods
 
-Automated tests are provided in `server.test.ts` to ensure that routes and middleware work as expected. Run tests with:
+- `use(middleware: Middleware)`: Add global middleware
+- `GET(path: string, handler: Handler, config?: RouteConfig)`: Define a GET route
+- `POST(path: string, handler: Handler, config?: RouteConfig)`: Define a POST route
+- `PUT(path: string, handler: Handler, config?: RouteConfig)`: Define a PUT route
+- `DELETE(path: string, handler: Handler, config?: RouteConfig)`: Define a DELETE route
+- `PATCH(path: string, handler: Handler, config?: RouteConfig)`: Define a PATCH route
+- `OPTIONS(path: string, handler: Handler, config?: RouteConfig)`: Define an OPTIONS route
+- `route(prefix: string, instance: XebecServer)`: Mount a nested server instance
 
-```sh
-deno test --allow-net --allow-write --allow-read
-```
+### Middleware
 
-## Conclusion
+Built-in middleware functions for common use cases:
 
-Xebec Server offers a clean and modular approach to building HTTP servers with Deno. With its support for middleware, dynamic routes, nested routing, and Socket.IO integration, it can be adapted for various server-side applications ranging from simple REST APIs to complex real-time systems.
+- `cors(options: CorsOptions)`: Handle Cross-Origin Resource Sharing
+- `securityHeaders()`: Add security-related response headers
+- `rateLimit(options: RateLimitOptions)`: Implement rate limiting
+
+### ResponseHelper
+
+Helper functions for creating common response types:
+
+- `json(data: unknown, status?: number, headers?: Record<string, string>)`: Create JSON response
+- `text(text: string, status?: number, headers?: Record<string, string>)`: Create text response
+- `error(message: string, status?: number, headers?: Record<string, string>)`: Create error response
+- `redirect(url: string, status?: number)`: Create redirect response
+
+## Security Considerations
+
+- Always use HTTPS in production
+- Implement proper authentication and authorization
+- Validate and sanitize all user input
+- Use rate limiting to prevent abuse
+- Keep dependencies up to date
+- Follow security best practices for your use case
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+MIT License - see LICENSE file for details

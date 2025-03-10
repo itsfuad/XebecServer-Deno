@@ -1,3 +1,4 @@
+import { Req, Handler, Middleware, ServerOptions, RouteConfig, ResponseHelper } from "./types.ts";
 
 /**
  * Represents a lightweight HTTP server with built-in routing and middleware support.
@@ -16,7 +17,14 @@
  *   parameter extraction, and query parsing.
  *
  * @example
- * const server = new XebecServer();
+ * ```typescript
+ * const server = new XebecServer({
+ *   debug: true,
+ *   maxBodySize: 1024 * 1024, // 1MB
+ *   defaultHeaders: {
+ *     "X-Powered-By": "Xebec"
+ *   }
+ * });
  *
  * // Add middleware
  * server.use((req, next) => {
@@ -26,35 +34,15 @@
  *
  * // Define a GET route with a dynamic parameter
  * server.GET("/user/:id", (req) => {
- *   return new Response(`User ID: ${req.params.id}`);
+ *   return ResponseHelper.json({ id: req.params.id });
  * });
  *
  * // Mount a nested server on a URL prefix
  * const adminServer = new XebecServer();
- * adminServer.GET("/dashboard", (req) => new Response("Admin Dashboard"));
+ * adminServer.GET("/dashboard", (req) => ResponseHelper.text("Admin Dashboard"));
  * server.route("/admin", adminServer);
+ * ```
  */
-
-export class Req extends Request {
-  params: Record<string, string>;
-  query: Record<string, string>;
-
-  constructor(
-    input: RequestInfo,
-    init?: RequestInit,
-    params: Record<string, string> = {},
-    query: Record<string, string> = {},
-  ) {
-    super(input, init);
-    this.params = params;
-    this.query = query;
-  }
-}
-
-export type Handler = (req: Req) => Promise<Response> | Response;
-
-export type Middleware = (req: Req, next: () => Promise<Response> | Response) => Promise<Response> | Response;
-
 export class XebecServer {
   private routes: {
     [method: string]: Array<{
@@ -63,11 +51,22 @@ export class XebecServer {
       paramNames: string[];
       handler: Handler;
       isWildcard: boolean;
+      middleware?: Middleware[];
+      options?: RouteConfig["options"];
     }>;
   } = {};
 
   private readonly middlewares: Middleware[] = [];
   private wildcardRoutes: { [method: string]: Handler | null } = {};
+  private readonly options: ServerOptions;
+
+  constructor(options: ServerOptions = {}) {
+    this.options = {
+      debug: false,
+      maxBodySize: 1024 * 1024, // 1MB default
+      ...options,
+    };
+  }
 
   // Middleware
   use(middleware: Middleware) {
@@ -75,39 +74,39 @@ export class XebecServer {
   }
 
   // Route definition methods
-  GET(path: string, callback: Handler) {
-    this.addRoute("GET", path, callback);
+  GET(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+    this.addRoute("GET", path, callback, config);
   }
 
-  POST(path: string, callback: Handler) {
-    this.addRoute("POST", path, callback);
+  POST(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+    this.addRoute("POST", path, callback, config);
   }
 
-  OPTIONS(path: string, callback: Handler) {
-    this.addRoute("OPTIONS", path, callback);
+  OPTIONS(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+    this.addRoute("OPTIONS", path, callback, config);
   }
 
-  PUT(path: string, callback: Handler) {
-    this.addRoute("PUT", path, callback);
+  PUT(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+    this.addRoute("PUT", path, callback, config);
   }
 
-  DELETE(path: string, callback: Handler) {
-    this.addRoute("DELETE", path, callback);
+  DELETE(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+    this.addRoute("DELETE", path, callback, config);
   }
 
-  PATCH(path: string, callback: Handler) {
-    this.addRoute("PATCH", path, callback);
+  PATCH(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+    this.addRoute("PATCH", path, callback, config);
   }
 
   route(prefix: string, instance: XebecServer) {
     if (!prefix.startsWith("/")) {
       prefix = "/" + prefix;
     }
-  
+
     this.use(async (req, next) => {
       const url = new URL(req.url);
       const pathname = url.pathname;
-  
+
       if (pathname.startsWith(prefix)) {
         const newPathname = pathname.slice(prefix.length) || "/";
         const newUrl = new URL(newPathname + url.search, url.origin);
@@ -117,20 +116,30 @@ export class XebecServer {
           req.params,
           req.query
         );
-  
-        const response = await instance.handler(newReq);
-  
-        // If the child server returns 404, allow the parent to handle it
-        if (response.status !== 404) {
-          return response;
+
+        try {
+          const response = await instance.handler(newReq);
+          if (response.status !== 404) {
+            return response;
+          }
+        } catch (error) {
+          if (instance.options.errorHandler) {
+            return instance.options.errorHandler(error as Error, newReq);
+          }
+          throw error;
         }
       }
-  
+
       return next();
     });
-  }  
+  }
 
-  private addRoute(method: string, path: string, handler: Handler) {
+  private addRoute(
+    method: string,
+    path: string,
+    handler: Handler,
+    config?: Omit<RouteConfig, "method" | "path" | "handler">
+  ) {
     const paramNames: string[] = [];
     const isWildcard = path === "*";
 
@@ -155,25 +164,34 @@ export class XebecServer {
         paramNames,
         handler,
         isWildcard,
+        middleware: config?.middleware,
+        options: config?.options,
       });
     }
   }
 
-  handler(req: Request) {
+  async handler(req: Request) {
     const url = new URL(req.url);
     const pathname = url.pathname;
     const method = req.method.toUpperCase();
     const routesForMethod = this.routes[method] || [];
 
+    // Check body size
+    const contentLength = parseInt(req.headers.get("content-length") || "0");
+    if (contentLength > this.options.maxBodySize!) {
+      return ResponseHelper.error("Request entity too large", 413);
+    }
+
     const clonedReq = new Req(req, req.clone(), {}, {});
 
     let index = 0;
-    const next = (): Promise<Response> | Response => {
+    const next = async (): Promise<Response> => {
       if (index < this.middlewares.length) {
         return this.middlewares[index++](clonedReq, next);
       }
 
       let matchedHandler: Handler | null = null;
+      let matchedRoute: typeof routesForMethod[0] | null = null;
       const matchedParams: Record<string, string> = {};
       const matchedQuery: Record<string, string> = {};
 
@@ -190,6 +208,7 @@ export class XebecServer {
           });
 
           matchedHandler = route.handler;
+          matchedRoute = route;
           break;
         }
       }
@@ -199,14 +218,55 @@ export class XebecServer {
       }
 
       if (matchedHandler) {
-        clonedReq.params = matchedParams;
-        clonedReq.query = matchedQuery;
-        return matchedHandler(clonedReq);
+        try {
+          clonedReq.params = matchedParams;
+          clonedReq.query = matchedQuery;
+
+          // Apply route-specific middleware
+          if (matchedRoute?.middleware) {
+            for (const middleware of matchedRoute.middleware) {
+              const response = await middleware(clonedReq, () => matchedHandler!(clonedReq));
+              if (response) return response;
+            }
+          }
+
+          // Apply route-specific options
+          if (matchedRoute?.options) {
+            if (matchedRoute.options.parseJson && req.headers.get("content-type")?.includes("application/json")) {
+              const body = await req.json();
+              (clonedReq as any).body = body;
+            }
+            if (matchedRoute.options.parseUrlEncoded && req.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
+              const body = await req.formData();
+              (clonedReq as any).body = Object.fromEntries(body);
+            }
+            if (matchedRoute.options.validate) {
+              const isValid = await matchedRoute.options.validate(clonedReq);
+              if (!isValid) {
+                return ResponseHelper.error("Validation failed", 400);
+              }
+            }
+          }
+
+          return matchedHandler(clonedReq);
+        } catch (error) {
+          if (this.options.errorHandler) {
+            return this.options.errorHandler(error as Error, clonedReq);
+          }
+          throw error;
+        }
       }
 
-      return new Response("Not found", { status: 404 });
+      return ResponseHelper.error("Not found", 404);
     };
 
-    return next();
+    try {
+      return await next();
+    } catch (error) {
+      if (this.options.errorHandler) {
+        return this.options.errorHandler(error as Error, clonedReq);
+      }
+      return ResponseHelper.error("Internal Server Error", 500);
+    }
   }
 }
