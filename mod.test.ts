@@ -169,3 +169,31 @@ Deno.test("XebecServer - * wildcard route", async () => {
   assertEquals(otherResponseText, "Wildcard route");
   assertEquals(otherResponse.status, 200);
 });
+
+// test for file upload
+Deno.test("XebecServer - File upload", async () => {
+  const app = new XebecServer();
+
+  app.POST("/upload", async (req) => {
+    const formData = await req.formData();
+    const file = formData.get("file");
+    if (!file) {
+      return new Response("No file provided", { status: 400 });
+    }
+
+    return new Response("File uploaded");
+  });
+
+  const formData = new FormData();
+  formData.append("file", new File(["sample.txt"], "sample.txt", { type: "text/plain" }));
+
+  const request = new Request("http://localhost:8080/upload", {
+    method: "POST",
+    body: formData,
+  });
+
+  const response = await app.handler(request);
+
+  assertEquals(await response.text(), "File uploaded");
+  assertEquals(response.status, 200);
+});

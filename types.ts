@@ -1,3 +1,5 @@
+export type Config = "method" | "path" | "handler";
+
 /**
  * Represents an HTTP request with additional functionality for parameter and query handling.
  * Extends the standard Request class with additional properties for route parameters and query strings.

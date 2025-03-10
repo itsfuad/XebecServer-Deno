@@ -1,4 +1,4 @@
-import { Req, Handler, Middleware, ServerOptions, RouteConfig, ResponseHelper } from "./types.ts";
+import { Req, Handler, Middleware, ServerOptions, RouteConfig, ResponseHelper, Config } from "./types.ts";
 
 /**
  * Represents a lightweight HTTP server with built-in routing and middleware support.
@@ -74,27 +74,27 @@ export class XebecServer {
   }
 
   // Route definition methods
-  GET(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+  GET(path: string, callback: Handler, config?: Omit<RouteConfig, Config>) {
     this.addRoute("GET", path, callback, config);
   }
 
-  POST(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+  POST(path: string, callback: Handler, config?: Omit<RouteConfig, Config>) {
     this.addRoute("POST", path, callback, config);
   }
 
-  OPTIONS(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+  OPTIONS(path: string, callback: Handler, config?: Omit<RouteConfig, Config>) {
     this.addRoute("OPTIONS", path, callback, config);
   }
 
-  PUT(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+  PUT(path: string, callback: Handler, config?: Omit<RouteConfig, Config>) {
     this.addRoute("PUT", path, callback, config);
   }
 
-  DELETE(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+  DELETE(path: string, callback: Handler, config?: Omit<RouteConfig, Config>) {
     this.addRoute("DELETE", path, callback, config);
   }
 
-  PATCH(path: string, callback: Handler, config?: Omit<RouteConfig, "method" | "path" | "handler">) {
+  PATCH(path: string, callback: Handler, config?: Omit<RouteConfig, Config>) {
     this.addRoute("PATCH", path, callback, config);
   }
 
@@ -138,7 +138,7 @@ export class XebecServer {
     method: string,
     path: string,
     handler: Handler,
-    config?: Omit<RouteConfig, "method" | "path" | "handler">
+    config?: Omit<RouteConfig, Config>
   ) {
     const paramNames: string[] = [];
     const isWildcard = path === "*";
@@ -174,99 +174,140 @@ export class XebecServer {
     const url = new URL(req.url);
     const pathname = url.pathname;
     const method = req.method.toUpperCase();
-    const routesForMethod = this.routes[method] || [];
-
+    
     // Check body size
     const contentLength = parseInt(req.headers.get("content-length") || "0");
-    if (contentLength > this.options.maxBodySize!) {
+    if (contentLength > (this.options.maxBodySize ?? 1024 * 1024)) {
       return ResponseHelper.error("Request entity too large", 413);
     }
-
+  
     const clonedReq = new Req(req, req.clone(), {}, {});
-
-    let index = 0;
-    const next = async (): Promise<Response> => {
-      if (index < this.middlewares.length) {
-        return this.middlewares[index++](clonedReq, next);
-      }
-
-      let matchedHandler: Handler | null = null;
-      let matchedRoute: typeof routesForMethod[0] | null = null;
-      const matchedParams: Record<string, string> = {};
-      const matchedQuery: Record<string, string> = {};
-
-      for (const route of routesForMethod) {
-        const match = route.regex.exec(pathname);
-        if (match) {
-          route.paramNames.forEach((name, index) => {
-            matchedParams[name] = match[index + 1];
-          });
-
-          const searchParams = new URLSearchParams(url.search);
-          searchParams.forEach((value, key) => {
-            matchedQuery[key] = value;
-          });
-
-          matchedHandler = route.handler;
-          matchedRoute = route;
-          break;
-        }
-      }
-
-      if (!matchedHandler && this.wildcardRoutes[method]) {
-        matchedHandler = this.wildcardRoutes[method];
-      }
-
-      if (matchedHandler) {
-        try {
-          clonedReq.params = matchedParams;
-          clonedReq.query = matchedQuery;
-
-          // Apply route-specific middleware
-          if (matchedRoute?.middleware) {
-            for (const middleware of matchedRoute.middleware) {
-              const response = await middleware(clonedReq, () => matchedHandler!(clonedReq));
-              if (response) return response;
-            }
-          }
-
-          // Apply route-specific options
-          if (matchedRoute?.options) {
-            if (matchedRoute.options.parseJson && req.headers.get("content-type")?.includes("application/json")) {
-              const body = await req.json();
-              (clonedReq as any).body = body;
-            }
-            if (matchedRoute.options.parseUrlEncoded && req.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
-              const body = await req.formData();
-              (clonedReq as any).body = Object.fromEntries(body);
-            }
-            if (matchedRoute.options.validate) {
-              const isValid = await matchedRoute.options.validate(clonedReq);
-              if (!isValid) {
-                return ResponseHelper.error("Validation failed", 400);
-              }
-            }
-          }
-
-          return matchedHandler(clonedReq);
-        } catch (error) {
-          if (this.options.errorHandler) {
-            return this.options.errorHandler(error as Error, clonedReq);
-          }
-          throw error;
-        }
-      }
-
-      return ResponseHelper.error("Not found", 404);
-    };
-
+  
     try {
-      return await next();
+      // Process through middleware chain
+      let index = 0;
+      const runMiddleware = async (): Promise<Response> => {
+        if (index < this.middlewares.length) {
+          return this.middlewares[index++](clonedReq, runMiddleware);
+        }
+        
+        // Find matching route
+        const matchResult = this.findMatchingRoute(method, pathname, url);
+        if (!matchResult) {
+          return ResponseHelper.error("Not found", 404);
+        }
+        
+        const { handler, route, params, query } = matchResult;
+        
+        // Apply params and query to request
+        clonedReq.params = params;
+        clonedReq.query = query;
+        
+        // Process route-specific middleware if present
+        if (route?.middleware && route.middleware.length > 0) {
+          return this.processRouteMiddleware(clonedReq, route.middleware, handler);
+        }
+        
+        // Apply route options and execute handler
+        await this.applyRouteOptions(clonedReq, route, req);
+        return handler(clonedReq);
+      };
+      
+      return await runMiddleware();
     } catch (error) {
       if (this.options.errorHandler) {
         return this.options.errorHandler(error as Error, clonedReq);
       }
       return ResponseHelper.error("Internal Server Error", 500);
+    }
+  }
+  
+  private findMatchingRoute(method: string, pathname: string, url: URL) {
+    const routesForMethod = this.routes[method] || [];
+    
+    // Check regular routes
+    for (const route of routesForMethod) {
+      const match = route.regex.exec(pathname);
+      if (match) {
+        const params: Record<string, string> = {};
+        route.paramNames.forEach((name, index) => {
+          params[name] = match[index + 1];
+        });
+        
+        const query: Record<string, string> = {};
+        const searchParams = new URLSearchParams(url.search);
+        searchParams.forEach((value, key) => {
+          query[key] = value;
+        });
+        
+        return { handler: route.handler, route, params, query };
+      }
+    }
+    
+    // Check wildcard route
+    if (this.wildcardRoutes[method]) {
+      return { 
+        handler: this.wildcardRoutes[method], 
+        route: null, 
+        params: {}, 
+        query: {} 
+      };
+    }
+    
+    return null;
+  }
+  
+  private processRouteMiddleware(
+    req: Req,
+    middlewares: Middleware[],
+    finalHandler: Handler
+  ): Promise<Response> {
+    let middlewareIndex = 0;
+    
+    const runNext = async (): Promise<Response> => {
+      if (middlewareIndex < middlewares.length) {
+        return await middlewares[middlewareIndex++](req, runNext);
+      }
+      return await finalHandler(req);
+    };
+    
+    return runNext();
+  }
+  
+  private async applyRouteOptions(
+    clonedReq: Req,
+    route: {
+      options?: {
+        parseJson?: boolean;
+        parseUrlEncoded?: boolean;
+        validate?: (req: Req) => Promise<boolean> | boolean;
+      };
+    } | null,
+    originalReq: Request
+  ): Promise<void> {
+    if (!route?.options) return;
+    
+    // Parse JSON body if needed
+    if (route.options.parseJson && 
+        originalReq.headers.get("content-type")?.includes("application/json")) {
+      const body = await originalReq.json();
+      (clonedReq as unknown as { body: unknown }).body = body;
+    }
+    
+    // Parse URL encoded form data if needed
+    if (route.options.parseUrlEncoded && 
+        originalReq.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
+      const body = await originalReq.formData();
+      (clonedReq as unknown as { body: Record<string, string> }).body =
+        Object.fromEntries(Array.from(body.entries(), ([key, value]) => [key, value.toString()]));
+    }
+    
+    // Validate request if validator provided
+    if (route.options.validate) {
+      const isValid = await route.options.validate(clonedReq);
+      if (!isValid) {
+        throw new Error("Validation failed");
+      }
     }
   }
 }

@@ -8,70 +8,44 @@ export interface CorsOptions {
   maxAge?: number;
 }
 
+function isOriginAllowed(origin: string, options: CorsOptions): boolean {
+  if (!options.origin) return false;
+  if (typeof options.origin === "function") return options.origin(origin);
+  if (Array.isArray(options.origin)) return options.origin.includes(origin);
+  return options.origin === origin;
+}
+
+function setCorsHeaders(headers: Headers, options: CorsOptions, origin?: string): void {
+  if (options.origin && origin && isOriginAllowed(origin, options)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
+  if (options.methods) {
+    headers.set("Access-Control-Allow-Methods", options.methods.join(", "));
+  }
+  if (options.allowedHeaders) {
+    headers.set("Access-Control-Allow-Headers", options.allowedHeaders.join(", "));
+  }
+  if (options.credentials) {
+    headers.set("Access-Control-Allow-Credentials", "true");
+  }
+  if (options.maxAge) {
+    headers.set("Access-Control-Max-Age", options.maxAge.toString());
+  }
+}
+
 export function cors(options: CorsOptions = {}): Middleware {
   return async (req: Req, next) => {
+    const origin = req.headers.get("origin") || undefined;
+    
     if (req.method === "OPTIONS") {
       const headers = new Headers();
-      
-      if (options.origin) {
-        const origin = req.headers.get("origin");
-        if (origin) {
-          if (typeof options.origin === "function") {
-            if (options.origin(origin)) {
-              headers.set("Access-Control-Allow-Origin", origin);
-            }
-          } else if (Array.isArray(options.origin)) {
-            if (options.origin.includes(origin)) {
-              headers.set("Access-Control-Allow-Origin", origin);
-            }
-          } else {
-            headers.set("Access-Control-Allow-Origin", options.origin);
-          }
-        }
-      }
-
-      if (options.methods) {
-        headers.set("Access-Control-Allow-Methods", options.methods.join(", "));
-      }
-
-      if (options.allowedHeaders) {
-        headers.set("Access-Control-Allow-Headers", options.allowedHeaders.join(", "));
-      }
-
-      if (options.credentials) {
-        headers.set("Access-Control-Allow-Credentials", "true");
-      }
-
-      if (options.maxAge) {
-        headers.set("Access-Control-Max-Age", options.maxAge.toString());
-      }
-
+      setCorsHeaders(headers, options, origin);
       return new Response(null, { headers });
     }
 
     const response = await next();
     const headers = new Headers(response.headers);
-
-    if (options.origin) {
-      const origin = req.headers.get("origin");
-      if (origin) {
-        if (typeof options.origin === "function") {
-          if (options.origin(origin)) {
-            headers.set("Access-Control-Allow-Origin", origin);
-          }
-        } else if (Array.isArray(options.origin)) {
-          if (options.origin.includes(origin)) {
-            headers.set("Access-Control-Allow-Origin", origin);
-          }
-        } else {
-          headers.set("Access-Control-Allow-Origin", options.origin);
-        }
-      }
-    }
-
-    if (options.credentials) {
-      headers.set("Access-Control-Allow-Credentials", "true");
-    }
+    setCorsHeaders(headers, options, origin);
 
     return new Response(response.body, {
       status: response.status,
@@ -82,7 +56,7 @@ export function cors(options: CorsOptions = {}): Middleware {
 }
 
 export function securityHeaders(): Middleware {
-  return async (req: Req, next) => {
+  return async (_: Req, next) => {
     const response = await next();
     const headers = new Headers(response.headers);
 
@@ -109,7 +83,7 @@ export interface RateLimitOptions {
 export function rateLimit(options: RateLimitOptions): Middleware {
   const requests = new Map<string, { count: number; resetTime: number }>();
 
-  return async (req: Req, next) => {
+  return (req: Req, next) => {
     const ip = req.headers.get("x-forwarded-for") || "unknown";
     const now = Date.now();
 
