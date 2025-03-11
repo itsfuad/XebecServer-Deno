@@ -15,6 +15,12 @@ function isOriginAllowed(origin: string, options: CorsOptions): boolean {
   return options.origin === origin;
 }
 
+/**
+ * Sets the CORS headers for the response
+ * @param headers - The headers object to set the CORS headers on
+ * @param options - The CORS options
+ * @param origin - The origin of the request
+ */
 function setCorsHeaders(headers: Headers, options: CorsOptions, origin?: string): void {
   if (options.origin && origin && isOriginAllowed(origin, options)) {
     headers.set("Access-Control-Allow-Origin", origin);
@@ -33,6 +39,11 @@ function setCorsHeaders(headers: Headers, options: CorsOptions, origin?: string)
   }
 }
 
+/**
+ * Middleware to handle CORS requests
+ * @param options - The CORS options
+ * @returns The middleware function
+ */
 export function cors(options: CorsOptions = {}): Middleware {
   return async (req: Req, next) => {
     const origin = req.headers.get("origin") || undefined;
@@ -55,6 +66,10 @@ export function cors(options: CorsOptions = {}): Middleware {
   };
 }
 
+/**
+ * Middleware to add security headers to the response
+ * @returns The middleware function
+ */
 export function securityHeaders(): Middleware {
   return async (_: Req, next) => {
     const response = await next();
@@ -75,11 +90,21 @@ export function securityHeaders(): Middleware {
   };
 }
 
+/**
+ * Middleware to rate limit requests
+ * @param options - The rate limit options
+ * @returns The middleware function
+ */
 export interface RateLimitOptions {
   windowMs: number;
   max: number;
 }
 
+/**
+ * Middleware to rate limit requests
+ * @param options - The rate limit options
+ * @returns The middleware function
+ */
 export function rateLimit(options: RateLimitOptions): Middleware {
   const requests = new Map<string, { count: number; resetTime: number }>();
 

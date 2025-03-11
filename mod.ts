@@ -222,6 +222,7 @@ export class XebecServer {
     }
   }
   
+  // find the matching route for the given method and pathname
   private findMatchingRoute(method: string, pathname: string, url: URL) {
     const routesForMethod = this.routes[method] || [];
     
